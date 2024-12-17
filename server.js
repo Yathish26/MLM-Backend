@@ -9,7 +9,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 
-const dBURL = process.env.MONGODB_URL;
+const dBURL = process.env.MONGODB_URL_CUSTOMERS;
 
 
 const mongoURI = dBURL;

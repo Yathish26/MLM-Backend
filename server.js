@@ -3,11 +3,16 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-const mongoURI = 'mongodb+srv://hopecommunitywelfare16:Y8N7DYyCgnrs3D4L@cluster0.k3pvc.mongodb.net/Customers';
+const dBURL = process.env.MONGODB_URL;
+
+
+const mongoURI = dBURL;
 mongoose.connect(mongoURI)
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.log(err));
@@ -18,7 +23,7 @@ app.use(bodyParser.json());
 const adminEmail = 'hope@gmail.com';
 const adminPassword = 'Hope@123';
 
-const JWT_SECRET = 'mlmfpyay';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const authenticateJWT = (req, res, next) => {
     const token = req.header('Authorization')?.split(' ')[1];

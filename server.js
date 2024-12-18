@@ -45,6 +45,7 @@ const authenticateJWT = (req, res, next) => {
 const customerSchema = new mongoose.Schema({
     name: { type: String, required: true },
     referenceId: { type: String, required: true },
+    referenceCustomer: { type: String, required: true },
     place: { type: String, required: true },
     mobile: { type: String, required: true },
     customerID: { type: String, required: true, unique: true },
@@ -58,11 +59,9 @@ const generateCustomerID = async () => {
     let isUnique = false;
 
     while (!isUnique) {
-        // Generate a random 10-digit number
         const randomNumber = Math.floor(1000000000 + Math.random() * 9000000000);
         customerID = `SS${randomNumber}`;
 
-        // Check if the generated customerID already exists in the database
         const existingCustomer = await Customer.findOne({ customerID });
         if (!existingCustomer) {
             isUnique = true;
@@ -88,21 +87,21 @@ app.post('/admin/login', (req, res) => {
 // Admin User Add
 app.post('/admin/adduser', async (req, res) => {
     try {
-        const { name, referenceId, place, mobile } = req.body;
+        const { name, referenceId, referenceCustomer, place, mobile } = req.body;
 
         if (!name || !referenceId || !place || !mobile) {
             return res.status(400).json({ message: 'All fields are required' });
         }
 
-        // Generate a unique customerID
         const customerID = await generateCustomerID();
 
         const newCustomer = new Customer({
             name,
             referenceId,
+            referenceCustomer,
             place,
             mobile,
-            customerID,  // Add the unique customerID
+            customerID,
         });
 
         await newCustomer.save();
@@ -125,6 +124,25 @@ app.get('/admin/sheet', authenticateJWT, async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 });
+
+// Validate Reference ID and Get Name
+app.get('/admin/validate-reference/:referenceId', authenticateJWT, async (req, res) => {
+    try {
+        const { referenceId } = req.params;
+
+        const customer = await Customer.findOne({ customerID: referenceId });
+
+        if (!customer) {
+            return res.status(404).json({ message: '#ERROR: Reference ID not found' });
+        }
+
+        res.status(200).json({ message: 'Reference ID validated', name: customer.name });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 
 
 app.listen(port, () => {

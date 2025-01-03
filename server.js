@@ -177,29 +177,45 @@ app.post('/admin/test/adduser', async (req, res) => {
             return res.status(400).json({ message: 'All fields are required' });
         }
 
+        // Generate a unique customer ID
         const customerID = await generateCustomerID();
 
+        // Default password
         const password = '123456';
 
+        // Find a parent customer who has an available child slot, excluding "SS0000000002"
         const parentCustomer = await Customer.findOne({
             $and: [
-                { customerID: { $ne: 'SS0000000002' } }, 
+                { customerID: { $ne: "SS0000000002" } },
                 {
-                    $expr: {
-                        $lt: [{ $size: { $ifNull: ["$children", []] } }, 2],
-                    },
-                },
-            ],
+                    $or: [
+                        { child1: "" },
+                        { child2: "" }
+                    ]
+                }
+            ]
         });
 
         if (!parentCustomer) {
             return res.status(400).json({ message: 'No available parent user found for referral.' });
         }
 
+        // Determine the child slot to assign the new customer
+        let childSlot = "";
+        if (!parentCustomer.child1) {
+            childSlot = "child1";
+        } else if (!parentCustomer.child2) {
+            childSlot = "child2";
+        }
+
+        if (!childSlot) {
+            return res.status(400).json({ message: 'Error identifying available child slot.' });
+        }
+
         const newCustomer = new Customer({
             name,
-            referenceId: parentCustomer.customerID, 
-            referenceCustomer: parentCustomer.name, 
+            referenceId: parentCustomer.customerID,
+            referenceCustomer: parentCustomer.name,
             place,
             mobile,
             customerID,
@@ -208,7 +224,7 @@ app.post('/admin/test/adduser', async (req, res) => {
 
         await newCustomer.save();
 
-        parentCustomer.children = [...(parentCustomer.children || []), newCustomer.customerID];
+        parentCustomer[childSlot] = newCustomer.name;
         await parentCustomer.save();
 
         res.status(200).json({
@@ -221,8 +237,6 @@ app.post('/admin/test/adduser', async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 });
-
-
 
 
 // Admin Delete User

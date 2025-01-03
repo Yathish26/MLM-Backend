@@ -23,6 +23,9 @@ app.use(bodyParser.json());
 const adminEmail = 'hope@gmail.com';
 const adminPassword = 'Hope@123';
 
+const controlEmail = 'admin@hirearrive.in';
+const controlPassword = 'Admin@123';
+
 const JWT_SECRET = "mlmfpyay";
 
 const authenticateJWT = (req, res, next) => {
@@ -67,6 +70,8 @@ const customerSchema = new mongoose.Schema({
     mobile: { type: String, required: true },
     customerID: { type: String, required: true, unique: true },
     password: { type: String, required: false },
+    child1: { type: String, default: "" },
+    child2: { type: String, default: "" },
 });
 
 const Customer = mongoose.model('CData', customerSchema, 'CData');
@@ -93,14 +98,21 @@ const generateCustomerID = async () => {
 app.post('/admin/login', (req, res) => {
     const { email, password } = req.body;
 
-    if (email === adminEmail && password === adminPassword) {
+    if ((email === adminEmail && password === adminPassword) ||
+        (email === controlEmail && password === controlPassword)) {
+
         const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: '1d' });
 
-        res.json({ message: 'Login successful', token });
+        if (email === controlEmail && password === controlPassword) {
+            res.json({ message: 'Login successful', token, control: 'yes' });
+        } else {
+            res.json({ message: 'Login successful', token });
+        }
     } else {
         res.status(401).json({ message: 'Invalid credentials' });
     }
 });
+
 
 // Admin User Add
 app.post('/admin/adduser', async (req, res) => {
@@ -113,7 +125,21 @@ app.post('/admin/adduser', async (req, res) => {
 
         const customerID = await generateCustomerID();
 
-        const password = '123456'
+        const password = '123456';
+
+        const referenceCustomerDoc = await Customer.findOne({ customerID: referenceId });
+
+        if (!referenceCustomerDoc) {
+            return res.status(400).json({ message: 'Reference customer not found' });
+        }
+
+        const children = [];
+        if (referenceCustomerDoc.child1) children.push(referenceCustomerDoc.child1);
+        if (referenceCustomerDoc.child2) children.push(referenceCustomerDoc.child2);
+
+        if (children.length >= 2) {
+            return res.status(400).json({ message: 'Reference customer already has 2 children' });
+        }
 
         const newCustomer = new Customer({
             name,
@@ -125,7 +151,14 @@ app.post('/admin/adduser', async (req, res) => {
             password,
         });
 
+        if (referenceCustomerDoc.child1 === "") {
+            referenceCustomerDoc.child1 = newCustomer.name;
+        } else {
+            referenceCustomerDoc.child2 = newCustomer.name;
+        }
+
         await newCustomer.save();
+        await referenceCustomerDoc.save();
 
         res.status(200).json({ message: 'Customer added successfully', customer: newCustomer });
     } catch (err) {
@@ -133,6 +166,111 @@ app.post('/admin/adduser', async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 });
+
+
+// Add User with Automatic Referral Assignment
+app.post('/admin/test/adduser', async (req, res) => {
+    try {
+        const { name, place, mobile } = req.body;
+
+        if (!name || !place || !mobile) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        const customerID = await generateCustomerID();
+
+        const password = '123456';
+
+        const parentCustomer = await Customer.findOne({
+            $and: [
+                { customerID: { $ne: 'SS0000000002' } }, 
+                {
+                    $expr: {
+                        $lt: [{ $size: { $ifNull: ["$children", []] } }, 2],
+                    },
+                },
+            ],
+        });
+
+        if (!parentCustomer) {
+            return res.status(400).json({ message: 'No available parent user found for referral.' });
+        }
+
+        const newCustomer = new Customer({
+            name,
+            referenceId: parentCustomer.customerID, 
+            referenceCustomer: parentCustomer.name, 
+            place,
+            mobile,
+            customerID,
+            password,
+        });
+
+        await newCustomer.save();
+
+        parentCustomer.children = [...(parentCustomer.children || []), newCustomer.customerID];
+        await parentCustomer.save();
+
+        res.status(200).json({
+            message: 'Customer added successfully',
+            customer: newCustomer,
+            parent: parentCustomer,
+        });
+    } catch (err) {
+        console.error('Error while adding customer:', err);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+
+
+
+// Admin Delete User
+app.delete('/admin/deleteuser/:customerId', authenticateJWT, async (req, res) => {
+    try {
+        const { customerId } = req.params;
+
+        const deletedCustomer = await Customer.findOneAndDelete({ customerID: customerId });
+
+        if (!deletedCustomer) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        res.status(200).json({ message: 'Customer deleted successfully', customer: deletedCustomer });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Admin Update User
+app.put('/admin/updateuser/:customerId', authenticateJWT, async (req, res) => {
+    try {
+        const { customerId } = req.params;
+        const { name, referenceId, referenceCustomer, place, mobile, password } = req.body;
+
+        if (!name && !referenceId && !referenceCustomer && !place && !mobile && !password) {
+            return res.status(400).json({ message: 'At least one field is required to update' });
+        }
+
+        const updatedCustomer = await Customer.findOneAndUpdate(
+            { customerID: customerId },
+            { name, referenceId, referenceCustomer, place, mobile, password },
+            { new: true, omitUndefined: true }
+        );
+
+        if (!updatedCustomer) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        res.status(200).json({ message: 'Customer updated successfully', customer: updatedCustomer });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+
 
 // Admin Sheet - Get all customers
 app.get('/admin/sheet', authenticateJWT, async (req, res) => {
@@ -194,6 +332,20 @@ app.post('/register', async (req, res) => {
 
         const customerID = await generateCustomerID();
 
+        const referenceCustomerDoc = await Customer.findOne({ customerID: refId });
+
+        if (!referenceCustomerDoc) {
+            return res.status(400).json({ message: 'Reference customer not found' });
+        }
+
+        const children = [];
+        if (referenceCustomerDoc.child1) children.push(referenceCustomerDoc.child1);
+        if (referenceCustomerDoc.child2) children.push(referenceCustomerDoc.child2);
+
+        if (children.length >= 2) {
+            return res.status(400).json({ message: 'Reference customer already has 2 children' });
+        }
+
         const newCustomer = new Customer({
             name,
             referenceId: refId,
@@ -204,7 +356,14 @@ app.post('/register', async (req, res) => {
             password,
         });
 
+        if (!referenceCustomerDoc.child1) {
+            referenceCustomerDoc.child1 = newCustomer.name;  
+        } else if (!referenceCustomerDoc.child2) {
+            referenceCustomerDoc.child2 = newCustomer.name;  
+        }
+
         await newCustomer.save();
+        await referenceCustomerDoc.save();
 
         res.status(200).json({ message: 'User registered successfully', customerID });
     } catch (err) {
@@ -212,6 +371,7 @@ app.post('/register', async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 });
+
 
 // User Login
 app.post('/login', async (req, res) => {
@@ -263,6 +423,36 @@ app.get('/profile', authenticateJWTCS, async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 });
+
+// Change Password
+app.post('/change-password', async (req, res) => {
+    try {
+        const { customerID, oldPassword, newPassword } = req.body;
+
+        if (!customerID || !oldPassword || !newPassword) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        const customer = await Customer.findOne({ customerID });
+
+        if (!customer) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        if (customer.password !== oldPassword) {
+            return res.status(401).json({ message: 'Old password is incorrect' });
+        }
+
+        customer.password = newPassword;
+        await customer.save();
+
+        res.status(200).json({ message: 'Password changed successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 
 
 
